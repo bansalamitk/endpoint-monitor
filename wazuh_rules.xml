@@ -1,0 +1,293 @@
+<!--
+  Wazuh custom rules for endpoint_monitor.py
+  Install: copy to /var/ossec/etc/rules/endpoint_monitor_rules.xml on Wazuh Manager
+  Rule IDs: 100200–100239 (adjust if conflicts exist)
+-->
+<group name="endpoint_monitor,">
+
+  <!-- Base rule: any event from endpoint_monitor -->
+  <rule id="100200" level="3">
+    <decoded_as>json</decoded_as>
+    <field name="source">endpoint_monitor</field>
+    <description>Endpoint Monitor event</description>
+  </rule>
+
+  <!-- ── Process Execution ─────────────────────────────────── -->
+
+  <rule id="100201" level="3">
+    <if_sid>100200</if_sid>
+    <field name="event_type">process_exec</field>
+    <description>Process executed on endpoint</description>
+    <group>process,</group>
+  </rule>
+
+  <rule id="100202" level="8">
+    <if_sid>100201</if_sid>
+    <field name="tags">suspicious_binary</field>
+    <description>Suspicious binary executed: $(details.comm)</description>
+    <group>process,suspicious,</group>
+  </rule>
+
+  <rule id="100203" level="10">
+    <if_sid>100201</if_sid>
+    <field name="tags">exec_from_staging</field>
+    <description>Binary executed from staging directory: $(details.exe) in $(details.cwd)</description>
+    <group>process,malware,</group>
+  </rule>
+
+  <!-- ── Privilege Escalation ──────────────────────────────── -->
+
+  <rule id="100204" level="6">
+    <if_sid>100201</if_sid>
+    <field name="tags">priv_esc</field>
+    <description>Privilege escalation binary used: $(details.comm) by $(details.user)</description>
+    <group>priv_esc,</group>
+  </rule>
+
+  <rule id="100205" level="10">
+    <if_sid>100200</if_sid>
+    <field name="event_type">uid_change</field>
+    <description>UID changed: $(details.ruser)($(details.ruid)) → euid $(details.euser)($(details.euid))</description>
+    <group>priv_esc,</group>
+  </rule>
+
+  <!-- ── Network ───────────────────────────────────────────── -->
+
+  <rule id="100206" level="3">
+    <if_sid>100200</if_sid>
+    <field name="event_type">network_connection</field>
+    <description>New network connection: $(details.proto) $(details.remote_addr):$(details.remote_port)</description>
+    <group>network,</group>
+  </rule>
+
+  <rule id="100207" level="6">
+    <if_sid>100206</if_sid>
+    <field name="tags">dns_query</field>
+    <description>DNS query detected from $(details.user) to $(details.remote_addr)</description>
+    <group>network,dns,</group>
+  </rule>
+
+  <rule id="100208" level="8">
+    <if_sid>100206</if_sid>
+    <field name="tags">suspicious_port</field>
+    <description>Connection to suspicious port $(details.remote_port) on $(details.remote_addr)</description>
+    <group>network,suspicious,</group>
+  </rule>
+
+  <!-- ── File Events ───────────────────────────────────────── -->
+
+  <rule id="100209" level="3">
+    <if_sid>100200</if_sid>
+    <field name="event_type">file_event</field>
+    <description>File event on $(details.path): $(details.events)</description>
+    <group>file,</group>
+  </rule>
+
+  <rule id="100210" level="12">
+    <if_sid>100209</if_sid>
+    <field name="tags">critical_file</field>
+    <description>CRITICAL file modified: $(details.path)</description>
+    <group>file,critical,</group>
+  </rule>
+
+  <rule id="100211" level="8">
+    <if_sid>100209</if_sid>
+    <field name="tags">executable_drop</field>
+    <description>Executable dropped in staging area: $(details.path)</description>
+    <group>file,malware,</group>
+  </rule>
+
+  <rule id="100212" level="6">
+    <if_sid>100209</if_sid>
+    <field name="tags">cron_modification</field>
+    <description>Cron job modified: $(details.path)</description>
+    <group>file,persistence,</group>
+  </rule>
+
+  <!-- ── Reverse Shell ─────────────────────────────────────── -->
+
+  <rule id="100213" level="14">
+    <if_sid>100200</if_sid>
+    <field name="event_type">reverse_shell_suspect</field>
+    <description>REVERSE SHELL suspected: $(details.comm) (PID $(details.pid)) holding socket $(details.socket_inode)</description>
+    <group>threat,reverse_shell,</group>
+  </rule>
+
+  <!-- ── Fork from shell (post-exploitation) ───────────────── -->
+
+  <rule id="100214" level="5">
+    <if_sid>100200</if_sid>
+    <field name="event_type">process_fork</field>
+    <field name="tags">fork_from_shell</field>
+    <description>Process forked from interactive shell: $(details.comm) (PID $(details.pid))</description>
+    <group>process,shell,</group>
+  </rule>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- ── Auditd-derived events (AuditdMonitor)               ── -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+
+  <rule id="100220" level="3">
+    <if_sid>100200</if_sid>
+    <field name="event_type">audit_event</field>
+    <description>Audit event: syscall=$(details.syscall) key=$(details.key) by $(details.comm)</description>
+    <group>audit,</group>
+  </rule>
+
+  <!-- Process execution via auditd (gives us EXECVE args) -->
+  <rule id="100221" level="3">
+    <if_sid>100220</if_sid>
+    <field name="details.key">proc_exec</field>
+    <description>Audit: exec $(details.cmdline) by $(details.comm) (user $(details.user))</description>
+    <group>audit,process,</group>
+  </rule>
+
+  <!-- Privilege escalation via auditd -->
+  <rule id="100222" level="8">
+    <if_sid>100220</if_sid>
+    <field name="details.key">priv_esc</field>
+    <description>Audit: privilege escalation — $(details.comm) by $(details.user)</description>
+    <group>audit,priv_esc,</group>
+  </rule>
+
+  <!-- Critical file tampering via auditd -->
+  <rule id="100223" level="12">
+    <if_sid>100220</if_sid>
+    <field name="details.key">file_tamper</field>
+    <description>Audit: CRITICAL file tampered — $(details.comm) (user $(details.user))</description>
+    <group>audit,file,critical,</group>
+  </rule>
+
+  <!-- Malware staging via auditd (write to /tmp, /dev/shm, etc.) -->
+  <rule id="100224" level="8">
+    <if_sid>100220</if_sid>
+    <field name="details.key">malware_staging</field>
+    <description>Audit: write to staging dir by $(details.comm) (user $(details.user))</description>
+    <group>audit,file,malware,</group>
+  </rule>
+
+  <!-- Network syscalls via auditd -->
+  <rule id="100225" level="3">
+    <if_sid>100220</if_sid>
+    <field name="details.key">net_conn</field>
+    <description>Audit: network syscall $(details.syscall) by $(details.comm)</description>
+    <group>audit,network,</group>
+  </rule>
+
+  <!-- DNS configuration change -->
+  <rule id="100226" level="8">
+    <if_sid>100220</if_sid>
+    <field name="details.key">dns_change</field>
+    <description>Audit: DNS configuration changed by $(details.comm)</description>
+    <group>audit,dns,persistence,</group>
+  </rule>
+
+  <!-- Kernel module loaded (rootkit indicator) -->
+  <rule id="100227" level="12">
+    <if_sid>100220</if_sid>
+    <field name="details.key">kmod_load</field>
+    <description>Audit: kernel module loaded/removed by $(details.comm) (user $(details.user))</description>
+    <group>audit,rootkit,</group>
+  </rule>
+
+  <!-- System time changed (anti-forensics) -->
+  <rule id="100228" level="10">
+    <if_sid>100220</if_sid>
+    <field name="details.key">time_change</field>
+    <description>Audit: system time changed by $(details.comm)</description>
+    <group>audit,anti_forensics,</group>
+  </rule>
+
+  <!-- Identity / account changes -->
+  <rule id="100229" level="8">
+    <if_sid>100220</if_sid>
+    <field name="details.key">identity</field>
+    <description>Audit: user/group account change by $(details.comm)</description>
+    <group>audit,identity,</group>
+  </rule>
+
+  <!-- Shell binary executed (LOLBin tracking) -->
+  <rule id="100230" level="5">
+    <if_sid>100220</if_sid>
+    <field name="details.key">shell_exec</field>
+    <description>Audit: shell/LOLBin executed — $(details.cmdline)</description>
+    <group>audit,shell,</group>
+  </rule>
+
+  <!-- Exec from staging dir (auditd-confirmed malware execution) -->
+  <rule id="100231" level="12">
+    <if_sid>100220</if_sid>
+    <field name="tags">exec_from_staging</field>
+    <description>Audit: execution from staging dir — $(details.cmdline) in $(details.cwd)</description>
+    <group>audit,malware,</group>
+  </rule>
+
+  <!-- ── Correlation: high-frequency exec from same user (brute force / scan) ── -->
+  <rule id="100232" level="10" frequency="20" timeframe="60">
+    <if_matched_sid>100221</if_matched_sid>
+    <same_field>details.user</same_field>
+    <description>Audit: high-frequency exec from $(details.user) ($(frequency) execs in 60s)</description>
+    <group>audit,anomaly,</group>
+  </rule>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- ── Process Accounting (BSD pacct) — guaranteed-capture ── -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+
+  <!-- Every process exit recorded by kernel acct() — guaranteed, even microsecond procs -->
+  <rule id="100233" level="2">
+    <if_sid>100200</if_sid>
+    <field name="event_type">process_exit</field>
+    <description>pacct: $(details.comm) (PID $(details.pid)) ran $(details.elapsed_sec)s, exit=$(details.exit_code)</description>
+    <group>process_accounting,</group>
+  </rule>
+
+  <!-- Short-lived process caught by pacct (would have been missed by /proc poll) -->
+  <rule id="100234" level="5">
+    <if_sid>100233</if_sid>
+    <field name="tags">short_lived</field>
+    <description>pacct: short-lived process $(details.comm) ran $(details.elapsed_sec)s by $(details.user)</description>
+    <group>process_accounting,short_lived,</group>
+  </rule>
+
+  <!-- Suspicious binary caught at exit (covers cases where exec event was dropped) -->
+  <rule id="100235" level="8">
+    <if_sid>100233</if_sid>
+    <field name="tags">suspicious_binary</field>
+    <description>pacct: suspicious binary $(details.comm) ran $(details.elapsed_sec)s by $(details.user)</description>
+    <group>process_accounting,suspicious,</group>
+  </rule>
+
+  <!-- Process used setuid privileges -->
+  <rule id="100236" level="8">
+    <if_sid>100233</if_sid>
+    <field name="tags">setuid_used</field>
+    <description>pacct: $(details.comm) used setuid (uid=$(details.uid), user=$(details.user))</description>
+    <group>process_accounting,priv_esc,</group>
+  </rule>
+
+  <!-- Process killed by signal (potential crash exploitation) -->
+  <rule id="100237" level="6">
+    <if_sid>100233</if_sid>
+    <field name="tags">killed</field>
+    <description>pacct: $(details.comm) killed by signal (exit=$(details.exit_code))</description>
+    <group>process_accounting,anomaly,</group>
+  </rule>
+
+  <!-- Process dumped core (potential exploit attempt) -->
+  <rule id="100238" level="10">
+    <if_sid>100233</if_sid>
+    <field name="tags">crash</field>
+    <description>pacct: $(details.comm) crashed and dumped core (potential exploit indicator)</description>
+    <group>process_accounting,anomaly,exploit,</group>
+  </rule>
+
+  <!-- High-frequency short-lived processes from one user (scanning / brute force) -->
+  <rule id="100239" level="10" frequency="50" timeframe="30">
+    <if_matched_sid>100234</if_matched_sid>
+    <same_field>details.user</same_field>
+    <description>pacct: $(details.user) spawned $(frequency) short-lived processes in 30s (possible scan/brute force)</description>
+    <group>process_accounting,anomaly,</group>
+  </rule>
+
+</group>

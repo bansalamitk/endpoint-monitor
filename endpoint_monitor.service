@@ -1,0 +1,32 @@
+[Unit]
+Description=Lightweight Endpoint Monitor (process, network, file, threat detection)
+After=network.target auditd.service
+Wants=network.target
+
+[Service]
+Type=simple
+# -O strips docstrings and assertions, saving ~300 KB of RSS.
+# PYTHONDONTWRITEBYTECODE avoids __pycache__ writes (we only run one file).
+Environment="PYTHONDONTWRITEBYTECODE=1"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/usr/bin/python3 -O /opt/endpoint-monitor/endpoint_monitor.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=endpoint-monitor
+
+# Cap memory at 50 MB hard, 30 MB soft (kernel will kill if exceeded).
+MemoryHigh=30M
+MemoryMax=50M
+
+# Hardening
+ProtectSystem=strict
+ReadWritePaths=/var/log/endpoint_monitor
+ProtectHome=true
+NoNewPrivileges=false
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+
+[Install]
+WantedBy=multi-user.target
